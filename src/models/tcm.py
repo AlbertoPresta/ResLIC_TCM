@@ -478,14 +478,14 @@ class TCM(CompressionModel):
             "para":{"means": means, "scales":scales, "y":y}
         }
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, strict = False):
         update_registered_buffers(
             self.gaussian_conditional,
             "gaussian_conditional",
             ["_quantized_cdf", "_offset", "_cdf_length", "scale_table"],
             state_dict,
         )
-        super().load_state_dict(state_dict)
+        super().load_state_dict(state_dict, strict = strict)
 
     @classmethod
     def from_state_dict(cls, state_dict):
