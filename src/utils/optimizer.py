@@ -1,5 +1,5 @@
-import torch
-import torch.nn as nn
+
+
 import torch.optim as optim
 
 def configure_optimizers(net, args):
@@ -17,14 +17,16 @@ def configure_optimizers(net, args):
         if n.endswith(".quantiles") and p.requires_grad
     }
 
-    # Make sure we don't have an intersection of parameters
+    # Make sure we don't have an intersection of parametersssss
     params_dict = dict(net.named_parameters())
     inter_params = parameters & aux_parameters
-    #union_params = parameters | aux_parameters
+    union_params = parameters | aux_parameters
 
     assert len(inter_params) == 0
-    #assert len(union_params) - len(params_dict.keys()) == 0
+    assert len(union_params) - len(params_dict.keys()) == 0
 
+
+    print("the optimizer is Adam")
     optimizer = optim.Adam(
         (params_dict[n] for n in sorted(parameters)),
         lr=args.learning_rate,

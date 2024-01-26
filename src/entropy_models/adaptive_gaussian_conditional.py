@@ -245,13 +245,13 @@ class HypeEntropyModelSoS(nn.Module):
         output_cdf = self.retrieve_cdf(symbols.shape, indexes)
 
         byte_stream = torchac.encode_float_cdf(output_cdf, symbols, check_input_bounds=True)
-
-        #c = torchac.decode_float_cdf(output_cdf, byte_stream)
+        c = torchac.decode_float_cdf(output_cdf, byte_stream)
+        
         #if torchac.decode_float_cdf(output_cdf, byte_stream).equal(symbols) is False:
-        #    raise ValueError("L'output Gaussiano codificato è diverso, qualcosa non va!")
+        #    raise ValueError("L'output Gaussiano codificato è diverso, qualcosa non va!")  #ssssss
         #else:
         #    print("l'immagine è ok!")
-        return byte_stream, output_cdf, shape_symbols 
+        return byte_stream, c, shape_symbols 
     
 
 
@@ -356,7 +356,7 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
         # updated.
         device = self.scale_table.device
         self.scale_table = self._prepare_scale_table(scale_table).to(device)
-        #self.update()
+        self.update()
         return True
 
     
@@ -418,6 +418,32 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
         self._cdf_length = pmf_length + 2
 
 
+    """
+    def update(self):
+        multiplier = -self._standardized_quantile(self.tail_mass / 2)
+        pmf_center = torch.ceil(self.scale_table * multiplier).int()
+        pmf_length = 2 * pmf_center + 1
+        max_length = torch.max(pmf_length).item()
+
+        device = pmf_center.device
+        samples = torch.abs(torch.arange(max_length, device=device).int() - pmf_center[:, None])
+
+        
+        samples_scale = self.scale_table.unsqueeze(1)
+        samples = samples.float()
+        samples_scale = samples_scale.float()
+        upper = self._standardized_cumulative((0.5 - samples) / samples_scale)
+        lower = self._standardized_cumulative((-0.5 - samples) / samples_scale)
+        pmf = upper - lower
+
+        tail_mass = 2 * lower[:, :1]
+
+        quantized_cdf = torch.Tensor(len(pmf_length), max_length + 2)
+        quantized_cdf = self._pmf_to_cdf(pmf, tail_mass, pmf_length, max_length)
+        self._quantized_cdf = quantized_cdf
+        self._offset = -pmf_center
+        self._cdf_length = pmf_length + 2
+    """
 
 
     def pmf_to_cdf(self):
@@ -575,13 +601,19 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
 
 
         x = self.quantize(x, "symbols", means = means, perms = perms)  
+        byte_stream, c, shape_symbols  = super().compress(x, indexes)  #ddddd
+        return byte_stream, c, shape_symbols
 
-        return super().compress(x, indexes) 
 
+
+    """
+    
     def decompress(self, byte_stream,  std,indexes, means = None):
         #outputs = super().decompress(byte_stream, output_cdf) 
         shapes = std.shape  
         cdf_shapes = std.ravel().shape
+        indexes = indexes.ravel().to(torch.int16)
+
         output_cdf = self.retrieve_cdf(cdf_shapes,indexes)
         outputs =   torchac.decode_float_cdf(output_cdf, byte_stream)
         #print("lo shape è ---> ",outputs.shape,"     ",means.shape)
@@ -593,4 +625,14 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
 
         outputs = self.dequantize(outputs, means = means)
         outputs = outputs.to("cuda")
+        return outputs
+    """
+
+
+    def decompress(self, byte_stream,  output_cdf):
+        #outputs = super().decompress(byte_stream, output_cdf) 
+
+
+        outputs =   torchac.decode_float_cdf(output_cdf, byte_stream)
+        #outputs = outputs.to("cuda")
         return outputs

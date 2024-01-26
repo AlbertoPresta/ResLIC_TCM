@@ -1,6 +1,8 @@
 import torch
-from utils.helper import AverageMeter, compute_msssim, compute_psnr
+from utils.helper import AverageMeter, compute_msssim, compute_psnr, read_image
 import wandb
+from compressai.ops import compute_padding
+import torch.nn.functional as F
 
 def train_one_epoch(counter, model, criterion, train_dataloader, optimizer,  epoch, clip_max_norm, type='mse', annealing_strategy = None, aux_optimizer = None, wandb_log = False):
     model.train()
@@ -177,8 +179,104 @@ def test_epoch(epoch, test_dataloader, model, criterion, wandb_log = True, valid
 
         wandb.log(log_dict)
 
-    return loss.avg
+    return bpp_loss.avg, psnr.avg , loss.avg
 
 
 
-    return loss.avg
+
+
+
+
+
+
+def compress_with_ac(model, filelist, device, epoch, baseline = False, wandb_log = False):
+    #model.update(None, device)
+    print("ho finito l'update")
+    bpp_loss = AverageMeter()
+    psnr = AverageMeter()
+    mssim = AverageMeter()
+
+    
+    with torch.no_grad():
+        for i,d in enumerate(filelist): 
+            if baseline is False:
+                print("-------------    ",i,"  --------------------------------")
+                x = read_image(d).to(device)
+                x = x.unsqueeze(0) 
+                h, w = x.size(2), x.size(3)
+                pad, unpad = compute_padding(h, w, min_div=2**6)  # pad to allow 6 strides of 2
+                x_padded = F.pad(x, pad, mode="constant", value=0)
+
+
+                #data = model.compress(x_padded)
+                print("shape: ",x_padded.shape)
+                data = model.compress(x_padded)
+                #out_net = model(x_padded,  training = False)
+                #out_dec = model.decompress(data)
+                out_dec = model.decompress(data["strings"], data["shape"],data["cdf"])
+
+
+
+                out_dec["x_hat"] = F.pad(out_dec["x_hat"], unpad)
+                out_dec["x_hat"].clamp_(0.,1.)
+  
+        
+                bpp, bpp_1, bpp_2= bpp_calculation(out_dec["x_hat"], data)
+                bpp_loss.update(bpp)
+                psnr_im = compute_psnr(x, out_dec["x_hat"])
+                psnr.update(psnr_im)
+                mssim.update(compute_msssim(x, out_dec["x_hat"]))   
+                print("bpp---> ",bpp,"  ",bpp_1,"   ",bpp_2,"  ",psnr_im) 
+
+                    
+                #xhat = out_net["x_hat"].ravel()
+                #xcomp = out_dec["x_hat"].ravel()
+                #for i in range(10):
+                #    print(xhat[i],"---", xcomp[i]) 
+            else:
+                #out_enc = model.compress(d)
+                d = d.to(device)
+                data = model.compress(d)
+   
+                out_dec = model.decompress(data["strings"], data["shape"])
+                #out_dec = model.decompress(out_enc["strings"], out_enc["shape"])
+                out_dec["x_hat"].clamp_(0.,1.)
+
+
+                
+                num_pixels = d.size(0) * d.size(2) * d.size(3)
+                bpp =   sum(len(s[0]) for s in data["strings"]) * 8.0 / num_pixels#, bpp_1, bpp_2= bpp_calculation(out_dec, out_enc["strings"])
+                bpp_loss.update(bpp)
+                psnr.update(compute_psnr(d, out_dec["x_hat"]))
+                mssim.update(compute_msssim(d, out_dec["x_hat"]))   
+
+                    
+
+    if wandb_log:
+        log_dict = {
+                "compress":epoch,
+                "compress/bpp_with_ac": bpp_loss.avg,
+                "compress/psnr_with_ac": psnr.avg,
+                "compress/mssim_with_ac":mssim.avg
+        }
+        
+        wandb.log(log_dict)
+    return bpp_loss.avg, psnr.avg
+
+
+def bpp_calculation(output, data):
+        size = output.size() 
+        num_pixels = size[0] * size[2] * size[3]
+
+
+
+        data_string_hype = data["strings"][1]
+        bpp_hype = sum(len(s) for s in data_string_hype) * 8.0 / num_pixels
+
+        data_string_main = data["strings"][0] # questo è una lista
+        bpp_main = sum(len(s[0]) for s in data_string_main) * 8.0 / num_pixels #ddddddddddd
+
+
+        
+        
+        return bpp_hype + bpp_main, bpp_hype, bpp_main

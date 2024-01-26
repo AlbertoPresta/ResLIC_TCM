@@ -331,8 +331,8 @@ class TCMSTanH(TCM):
     def update(self, scale_table=None, force=False):
         if scale_table is None:
             scale_table = get_scale_table()
-        updated = self.gaussian_conditional.update_scale_table(scale_table, force=force)
-        updated |= super().update(force=force)
+        updated = self.gaussian_conditional.update_scale_table(scale_table)
+        self.entropy_bottleneck.update(force = force)
         return updated
     
 
@@ -369,6 +369,18 @@ class TCMSTanH(TCM):
         inv_perm = np.arange(len(x.shape))[np.argsort(perm)] # perm and inv perm
         return perm, inv_perm 
 
+
+    def freeze(self, gauss_tr = True):
+        for p in self.parameters():
+            p.requires_grad = False 
+        for n,p in self.named_parameters():
+            p.requires_grad = False
+        
+        if gauss_tr:
+            for p in self.gaussian_conditional.stanh.parameters():
+                p.requires_grad = True
+            for n,p in self.gaussian_conditional.stanh.named_parameters():
+                p.requires_grad = True
 
     def forward(self, x, tr = True):
 
@@ -479,6 +491,7 @@ class TCMSTanH(TCM):
         symbols_list = []
         indexes_list = []
         y_strings = []
+        cdfs = []
        
 
         for slice_index, y_slice in enumerate(y_slices):
@@ -497,8 +510,8 @@ class TCMSTanH(TCM):
             index = self.gaussian_conditional.build_indexes(scale)
 
             #y_q_slice = self.gaussian_conditional.quantize(y_slice, "symbols", mu)
-            slice_string, _, _ = self.gaussian_conditional.compress(y_slice, index,  means = mu) 
-            
+            slice_string, output_cdf, _ = self.gaussian_conditional.compress(y_slice, index,  means = mu) 
+            cdfs.append(output_cdf)
             
             y_q_slice = self.gaussian_conditional.quantize(y_slice, mode = "symbols", means = mu)
             y_q_slice = self.gaussian_conditional.dequantize(y_q_slice)
@@ -522,29 +535,11 @@ class TCMSTanH(TCM):
         #y_string = encoder.flush()
 
 
-        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:],"cdf":cdfs}
 
-    def _likelihood(self, inputs, scales, means=None):
-        half = float(0.5)
-        if means is not None:
-            values = inputs - means
-        else:
-            values = inputs
 
-        scales = torch.max(scales, torch.tensor(0.11))
-        values = torch.abs(values)
-        upper = self._standardized_cumulative((half - values) / scales)
-        lower = self._standardized_cumulative((-half - values) / scales)
-        likelihood = upper - lower
-        return likelihood
 
-    def _standardized_cumulative(self, inputs):
-        half = float(0.5)
-        const = float(-(2 ** -0.5))
-        # Using the complementary error function maximizes numerical precision.
-        return half * torch.erfc(const * inputs)
-
-    def decompress(self, strings, shape):
+    def decompress(self, strings, shape, cdfs):
         z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
         latent_scales = self.h_scale_s(z_hat)
         latent_means = self.h_mean_s(z_hat)
@@ -573,9 +568,10 @@ class TCMSTanH(TCM):
 
             index = self.gaussian_conditional.build_indexes(scale)
 
-            rv = self.gaussian_conditional.decompress(y_string[slice_index], scale, index) # decompress è giò qui dentro 
-            rv = torch.Tensor(rv).reshape(1, -1, y_shape[0], y_shape[1])
-
+            #rv = self.gaussian_conditional.decompress(y_string[slice_index], scale, index) # decompress è giò qui dentro 
+            #rv =  self.gaussian_conditional.decompress(y_string[slice_index], cdfs[slice_index])
+            #rv = torch.Tensor(rv).reshape(1, -1, y_shape[0], y_shape[1]).to("cuda")
+            rv = torch.Tensor(cdfs[slice_index].type(torch.float)).reshape(1, -1, y_shape[0], y_shape[1]).to("cuda")
             
             y_hat_slice = rv + mu
 

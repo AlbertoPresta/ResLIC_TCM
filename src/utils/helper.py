@@ -4,6 +4,10 @@ import torch.nn as nn
 from annealings import StanhAnnealings, Annealing_triangle, RandomAnnealings
 import torch 
 import math
+from PIL import Image
+from torchvision import transforms
+import torch.nn.functional as F
+
 
 def compute_psnr(a, b):
     mse = torch.mean((a - b)**2).item()
@@ -32,7 +36,7 @@ from os.path import join
 def create_savepath(args,epoch,base_path):
     now = datetime.now()
     date_time = now.strftime("%m%d")
-    c = join(date_time,"_lambda_",str(args.lmbda_starter),"_epoch_",str(epoch)).replace("/","_")
+    c = join(date_time,"_lambda_",str(args.lmbda),"_epoch_",str(epoch)).replace("/","_")
 
     
     c_best = join(c,"best").replace("/","_")
@@ -46,8 +50,15 @@ def create_savepath(args,epoch,base_path):
     
     print("savepath: ",savepath)
     print("savepath best: ",savepath_best)
-    return savepath, savepath_best
+    very_best = savepath_best = join(base_path,"_very_best.pth.tar")
+    return savepath, savepath_best,very_best
 
+
+def read_image(filepath, ):
+    #assert filepath.is_file()
+    img = Image.open(filepath)
+    img = img.convert("RGB")
+    return transforms.ToTensor()(img)
 
 
 def compute_msssim(a, b):
