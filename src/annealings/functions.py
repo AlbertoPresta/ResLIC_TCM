@@ -4,7 +4,7 @@ import torch
 
 
 
-class Annealings(nn.Module):
+class StanhAnnealings(nn.Module):
     def __init__( self, iteration = 1500, 
                         beta = 1, 
                         factor = 50, 

@@ -138,11 +138,11 @@ def main(argv):
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
 
-    optimizer, aux_optimizer = configure_optimizers(net, args)
+    optimizer, aux_optimizer = configure_optimizers(net, args) #ffffff
     milestones = args.lr_epoch
     print("milestones: ", milestones)
     #lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.1, last_epoch=-1)
-    lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", factor=0.3, patience=4)
+    lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", factor=0.3, patience=10)
 
     criterion = RateDistortionLoss(lmbda=args.lmbda, type=type)
 

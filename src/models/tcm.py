@@ -1,6 +1,6 @@
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.ans import BufferedRansEncoder, RansDecoder
-from compressai.models import CompressionModel
+from .base import CompressionModel
 from compressai.layers import (
     AttentionBlock,
     ResidualBlock,
@@ -309,7 +309,7 @@ class SwinBlock(nn.Module):
 
 class TCM(CompressionModel):
     def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128,  M=320, num_slices=5, max_support_slices=5, **kwargs):
-        super().__init__(entropy_bottleneck_channels=N)
+        super().__init__()
         self.config = config
         self.head_dim = head_dim
         self.window_size = 8
@@ -347,7 +347,7 @@ class TCM(CompressionModel):
 
         self.ha_down1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
                       for i in range(config[0])] + \
-                      [conv3x3(2*N, 192, stride=2)]
+                      [conv3x3(2*N, N, stride=2)]
 
         self.h_a = nn.Sequential(
             *[ResidualBlockWithStride(320, 2*N, 2)] + \
@@ -359,17 +359,17 @@ class TCM(CompressionModel):
                       [subpel_conv3x3(2*N, 320, 2)]
 
         self.h_mean_s = nn.Sequential(
-            *[ResidualBlockUpsample(192, 2*N, 2)] + \
+            *[ResidualBlockUpsample(N, 2*N, 2)] + \
             self.hs_up1
         )
 
         self.hs_up2 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
                       for i in range(config[3])] + \
-                      [subpel_conv3x3(2*N, 320, 2)]
+                      [subpel_conv3x3(2*N, 320, 2)] #dd
 
 
         self.h_scale_s = nn.Sequential(
-            *[ResidualBlockUpsample(192, 2*N, 2)] + \
+            *[ResidualBlockUpsample(N, 2*N, 2)] + \
             self.hs_up2
         )
 
@@ -413,7 +413,7 @@ class TCM(CompressionModel):
             ) for i in range(self.num_slices)
         )
 
-        self.entropy_bottleneck = EntropyBottleneck(192)
+        self.entropy_bottleneck = EntropyBottleneck(N)
         self.gaussian_conditional = GaussianConditional(None)
 
     def update(self, scale_table=None, force=False):

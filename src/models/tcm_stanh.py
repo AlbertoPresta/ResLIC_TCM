@@ -319,7 +319,7 @@ class TCMSTanH(TCM):
                                                             channels = N,
                                                             beta = self.gaussian_configuration["beta"], 
                                                             num_sigmoids = self.gaussian_configuration["num_sigmoids"], 
-                                                            symmetry = self.gaussian_configuration["activation"],
+                                                            symmetry = self.gaussian_configuration["symmetry"],
                                                             extrema = self.gaussian_configuration["extrema"], 
                                                             trainable =  self.gaussian_configuration["trainable"],
                                                             device = torch.device("cuda")
@@ -361,8 +361,16 @@ class TCMSTanH(TCM):
         print(" trainable parameters: ",model_tr_parameters)
         print(" freeze parameters: ", model_fr_parameters)
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
-    
-    def forward(self, x):
+
+
+    def define_permutation(self, x):
+        perm = np.arange(len(x.shape)) 
+        perm[0], perm[1] = perm[1], perm[0]
+        inv_perm = np.arange(len(x.shape))[np.argsort(perm)] # perm and inv perm
+        return perm, inv_perm 
+
+
+    def forward(self, x, tr = True):
 
 
         self.gaussian_conditional.stanh.update_state(x.device)
@@ -398,7 +406,7 @@ class TCMSTanH(TCM):
             scale_list.append(scale)
 
 
-            _, y_slice_likelihood = self.gaussian_conditional(y_slice, scale, mu)
+            _, y_slice_likelihood = self.gaussian_conditional(y_slice, scale, means = mu,training = tr)
             y_likelihood.append(y_slice_likelihood)
             #y_hat_slice = ste_round(y_slice - mu) + mu
             y_hat_slice = self.gaussian_conditional.quantize(y_slice - mu, mode = "dequantize") + mu
@@ -430,9 +438,9 @@ class TCMSTanH(TCM):
 
     def compute_gap(self, inputs, y_hat):
         perm, _ = self.define_permutation(inputs)
-        values =  inputs.permute(perm).contiguous() # flatten y and call it values
+        values =  inputs.permute(*perm).contiguous() # flatten y and call it values
         values = values.reshape(1, 1, -1) # reshape values      
-        y_hat_p =  y_hat.permute(perm).contiguous() # flatten y and call it values
+        y_hat_p =  y_hat.permute(*perm).contiguous() # flatten y and call it values
         y_hat_p = y_hat_p.reshape(1, 1, -1) # reshape values     
         with torch.no_grad():    
             out = self.gaussian_conditional.stanh(values,-1) 

@@ -12,6 +12,7 @@ RUN pip install timm
 RUN apt update -y
 RUN apt install -y gcc
 RUN apt install -y g++ 
+RUN pip install einops
 
 
 

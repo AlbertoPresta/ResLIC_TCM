@@ -523,7 +523,7 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
 
 
 
-    def forward(self, values ,scales ,  training = None, means = None):
+    def forward(self, values ,scales ,  training = True, means = None):
 
 
         if training is None:

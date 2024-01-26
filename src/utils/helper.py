@@ -1,7 +1,7 @@
 
 from pytorch_msssim import ms_ssim
 import torch.nn as nn
-from annealings import StHAnnealing, Annealing_triangle, RandomAnnealings
+from annealings import StanhAnnealings, Annealing_triangle, RandomAnnealings
 import torch 
 import math
 
@@ -14,7 +14,7 @@ def configure_latent_space_policy(args):
     gaussian_configuration = {
                 "beta": args.gauss_beta, 
                 "num_sigmoids": args.gauss_num_sigmoids, 
-                "gauss_annealing": args.gauss_annealing, 
+                "annealing": args.gauss_annealing, 
                 "symmetry": args.symmetry, 
                 "gap_factor": args.gauss_gp ,
                 "extrema": args.gauss_extrema ,
@@ -95,7 +95,7 @@ def configure_annealings(gaussian_configuration):
         annealing_strategy_gaussian = Annealing_triangle(beta = gaussian_configuration["beta"], factor = gaussian_configuration["gap_factor"])
     
     else:
-        annealing_strategy_gaussian = StHAnnealing(beta = gaussian_configuration["beta"], 
+        annealing_strategy_gaussian = StanhAnnealings(beta = gaussian_configuration["beta"], 
                                     factor = gaussian_configuration["gap_factor"], 
                                     type = gaussian_configuration["annealing"]) 
     

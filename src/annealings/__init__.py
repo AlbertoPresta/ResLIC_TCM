@@ -1,1 +1,1 @@
-from functions import StHAnnealing, RandomAnnealings, Annealing_triangle
+from .functions import StanhAnnealings, RandomAnnealings, Annealing_triangle

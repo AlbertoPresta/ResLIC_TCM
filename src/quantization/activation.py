@@ -183,7 +183,7 @@ class SymStanH(nn.Module):
         
         if self.num_sigmoids == 0:
 
-            self.b = torch.nn.Parameter(self.range_num.type(torch.FloatTensor))   + torch.relu( torch.randn(len(self.range_num)), requires_grad= trainable)
+            self.b = torch.nn.Parameter(self.range_num.type(torch.FloatTensor),requires_grad= trainable)
 
             self.w = torch.nn.Parameter(torch.ones(len(self.range_num)),requires_grad= trainable )  # + torch.relu( torch.randn(len(self.range_num)))  #torch.relu( torch.randn(len(self.range_num))) +  torch.relu( torch.randn(len(self.range_num))) +   torch.relu( torch.randn(len(self.range_num)))  +  torch.relu( torch.randn(len(self.range_num))) + torch.relu( torch.randn(len(self.range_num)))
         else:

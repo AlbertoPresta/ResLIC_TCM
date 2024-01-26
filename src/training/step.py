@@ -21,6 +21,9 @@ def train_one_epoch(counter, model, criterion, train_dataloader, optimizer,  epo
 
         out_net = model(d)
 
+        out_criterion = criterion(out_net, d)
+        out_criterion["loss"].backward()
+
         if annealing_strategy is not None:
             gap = out_net["gap"]
             if annealing_strategy.type=="random":
@@ -43,8 +46,6 @@ def train_one_epoch(counter, model, criterion, train_dataloader, optimizer,  epo
 
         
 
-        out_criterion = criterion(out_net, d)
-        out_criterion["loss"].backward()
         if clip_max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
         optimizer.step()

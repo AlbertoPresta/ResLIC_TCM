@@ -21,7 +21,7 @@ from torch.utils.data import Dataset
 class ImageFolder(Dataset):
 
 
-    def __init__(self, root, num_images = 4000, transform=None, split="train"):
+    def __init__(self, root, num_images = 48000, transform=None, split="train"):
         splitdir = Path(root) / split / "data"
 
         if not splitdir.is_dir():
