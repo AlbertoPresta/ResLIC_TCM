@@ -1,7 +1,6 @@
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.ans import BufferedRansEncoder, RansDecoder
-from compressai.models import CompressionModel
-from .tcm import TCM
+from ..base import CompressionModel
 from compressai.layers import (
     AttentionBlock,
     ResidualBlock,
@@ -15,7 +14,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 import torch
-from entropy_models import GaussianConditionalStanh
 
 from einops import rearrange 
 from einops.layers.torch import Rearrange
@@ -309,83 +307,122 @@ class SwinBlock(nn.Module):
             x = F.pad(x, (-padding_col, -padding_col-1, -padding_row, -padding_row-1))
         return trans_x
 
-class TCMSTanH(TCM):
-    def __init__(self, gaussian_configuration, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128,  M=320, num_slices=5, max_support_slices=5):
-        super().__init__(config=config, head_dim=head_dim, drop_path_rate=drop_path_rate, N=N,  M=M, num_slices=num_slices, max_support_slices=max_support_slices)
+class TCM(CompressionModel):
+    def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128,  M=320, num_slices=5, max_support_slices=5, **kwargs):
+        super().__init__()
+        self.config = config
+        self.head_dim = head_dim
+        self.window_size = 8
+        self.num_slices = num_slices
+        self.max_support_slices = max_support_slices
+        dim = N
+        self.M = M
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(config))]
+        begin = 0
+
+        self.m_down1 = [ConvTransBlock(dim, dim, self.head_dim[0], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
+                      for i in range(config[0])] + \
+                      [ResidualBlockWithStride(2*N, 2*N, stride=2)]
+        self.m_down2 = [ConvTransBlock(dim, dim, self.head_dim[1], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW')
+                      for i in range(config[1])] + \
+                      [ResidualBlockWithStride(2*N, 2*N, stride=2)]
+        self.m_down3 = [ConvTransBlock(dim, dim, self.head_dim[2], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW')
+                      for i in range(config[2])] + \
+                      [conv3x3(2*N, M, stride=2)]
+
+        self.m_up1 = [ConvTransBlock(dim, dim, self.head_dim[3], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
+                      for i in range(config[3])] + \
+                      [ResidualBlockUpsample(2*N, 2*N, 2)]
+        self.m_up2 = [ConvTransBlock(dim, dim, self.head_dim[4], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
+                      for i in range(config[4])] + \
+                      [ResidualBlockUpsample(2*N, 2*N, 2)]
+        self.m_up3 = [ConvTransBlock(dim, dim, self.head_dim[5], self.window_size, dpr[i+begin], 'W' if not i%2 else 'SW') 
+                      for i in range(config[5])] + \
+                      [subpel_conv3x3(2*N, 3, 2)]
+        
+        self.g_a = nn.Sequential(*[ResidualBlockWithStride(3, 2*N, 2)] + self.m_down1 + self.m_down2 + self.m_down3)
+        
+
+        self.g_s = nn.Sequential(*[ResidualBlockUpsample(M, 2*N, 2)] + self.m_up1 + self.m_up2 + self.m_up3)
+
+        self.ha_down1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
+                      for i in range(config[0])] + \
+                      [conv3x3(2*N, 192, stride=2)]
+
+        self.h_a = nn.Sequential(
+            *[ResidualBlockWithStride(320, 2*N, 2)] + \
+            self.ha_down1
+        )
+
+        self.hs_up1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
+                      for i in range(config[3])] + \
+                      [subpel_conv3x3(2*N, 320, 2)]
+
+        self.h_mean_s = nn.Sequential(
+            *[ResidualBlockUpsample(192, 2*N, 2)] + \
+            self.hs_up1
+        )
+
+        self.hs_up2 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i%2 else 'SW') 
+                      for i in range(config[3])] + \
+                      [subpel_conv3x3(2*N, 320, 2)]
 
 
-        self.gaussian_configuration = gaussian_configuration
-        self.gaussian_conditional = GaussianConditionalStanh(None,
-                                                            channels = N,
-                                                            beta = self.gaussian_configuration["beta"], 
-                                                            num_sigmoids = self.gaussian_configuration["num_sigmoids"], 
-                                                            symmetry = self.gaussian_configuration["symmetry"],
-                                                            extrema = self.gaussian_configuration["extrema"], 
-                                                            trainable =  self.gaussian_configuration["trainable"],
-                                                            device = torch.device("cuda")
-                                                            )
+        self.h_scale_s = nn.Sequential(
+            *[ResidualBlockUpsample(192, 2*N, 2)] + \
+            self.hs_up2
+        )
 
 
+        self.atten_mean = nn.ModuleList(
+            nn.Sequential(
+                SWAtten((320 + (320//self.num_slices)*min(i, 5)), (320 + (320//self.num_slices)*min(i, 5)), 16, self.window_size,0, inter_dim=128)
+            ) for i in range(self.num_slices)
+            )
+        self.atten_scale = nn.ModuleList(
+            nn.Sequential(
+                SWAtten((320 + (320//self.num_slices)*min(i, 5)), (320 + (320//self.num_slices)*min(i, 5)), 16, self.window_size,0, inter_dim=128)
+            ) for i in range(self.num_slices)
+            )
+        self.cc_mean_transforms = nn.ModuleList(
+            nn.Sequential(
+                conv(320 + (320//self.num_slices)*min(i, 5), 224, stride=1, kernel_size=3),
+                nn.GELU(),
+                conv(224, 128, stride=1, kernel_size=3),
+                nn.GELU(),
+                conv(128, (320//self.num_slices), stride=1, kernel_size=3),
+            ) for i in range(self.num_slices)
+        )
+        self.cc_scale_transforms = nn.ModuleList(
+            nn.Sequential(
+                conv(320 + (320//self.num_slices)*min(i, 5), 224, stride=1, kernel_size=3),
+                nn.GELU(),
+                conv(224, 128, stride=1, kernel_size=3),
+                nn.GELU(),
+                conv(128, (320//self.num_slices), stride=1, kernel_size=3),
+            ) for i in range(self.num_slices)
+            )
 
+        self.lrp_transforms = nn.ModuleList(
+            nn.Sequential(
+                conv(320 + (320//self.num_slices)*min(i+1, 6), 224, stride=1, kernel_size=3),
+                nn.GELU(),
+                conv(224, 128, stride=1, kernel_size=3),
+                nn.GELU(),
+                conv(128, (320//self.num_slices), stride=1, kernel_size=3),
+            ) for i in range(self.num_slices)
+        )
 
+        self.entropy_bottleneck = EntropyBottleneck(192)
+        self.gaussian_conditional = GaussianConditional(None)
     def update(self, scale_table=None, force=False):
         if scale_table is None:
             scale_table = get_scale_table()
-        updated = self.gaussian_conditional.update_scale_table(scale_table)
-        self.entropy_bottleneck.update(force = force)
+        updated = self.gaussian_conditional.update_scale_table(scale_table, force=force)
+        updated |= super().update(force=force)
         return updated
     
-
-    def print_information(self):
-        print(" g_a: ",sum(p.numel() for p in self.g_a.parameters()))
-
-        print(" h_a: ",sum(p.numel() for p in self.h_a.parameters()))
-
-
-        print(" h_means_a: ",sum(p.numel() for p in self.h_mean_s.parameters()))
-        print(" h_scale_a: ",sum(p.numel() for p in self.h_scale_s.parameters()))
-
-        print("cc_mean_transforms",sum(p.numel() for p in self.cc_mean_transforms.parameters()))
-        print("cc_scale_transforms",sum(p.numel() for p in self.cc_scale_transforms.parameters()))
-
-        print("attention_scale",sum(p.numel() for p in self.atten_scale.parameters()))
-        print("attention_mean",sum(p.numel() for p in self.atten_mean.parameters()))
-        print("lrp_transform",sum(p.numel() for p in self.lrp_transforms.parameters()))
-        print("entropy_bottleneck",sum(p.numel() for p in self.entropy_bottleneck.parameters()))
-        print(" TRAINABLE STANH",sum(p.numel() for p in self.gaussian_conditional.stanh.parameters() if p.requires_grad))
-        print(" FROZEN STANH",sum(p.numel() for p in self.gaussian_conditional.stanh.parameters() if p.requires_grad == False))
-
-        print("**************************************************************************")
-        model_tr_parameters = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        model_fr_parameters = sum(p.numel() for p in self.parameters() if p.requires_grad== False)
-        print(" trainable parameters: ",model_tr_parameters)
-        print(" freeze parameters: ", model_fr_parameters)
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
-
-    def define_permutation(self, x):
-        perm = np.arange(len(x.shape)) 
-        perm[0], perm[1] = perm[1], perm[0]
-        inv_perm = np.arange(len(x.shape))[np.argsort(perm)] # perm and inv perm
-        return perm, inv_perm 
-
-
-    def freeze(self, gauss_tr = True):
-        for p in self.parameters():
-            p.requires_grad = False 
-        for n,p in self.named_parameters():
-            p.requires_grad = False
-        
-        if gauss_tr:
-            for p in self.gaussian_conditional.stanh.parameters():
-                p.requires_grad = True
-            for n,p in self.gaussian_conditional.stanh.named_parameters():
-                p.requires_grad = True
-
-    def forward(self, x, tr = True):
-
-
-        self.gaussian_conditional.stanh.update_state(x.device)
+    def forward(self, x):
         y = self.g_a(x)
         y_shape = y.shape[2:]
         z = self.h_a(y)
@@ -410,30 +447,23 @@ class TCMSTanH(TCM):
             mu = self.cc_mean_transforms[slice_index](mean_support)
             mu = mu[:, :, :y_shape[0], :y_shape[1]]
             mu_list.append(mu)
-
             scale_support = torch.cat([latent_scales] + support_slices, dim=1)
             scale_support = self.atten_scale[slice_index](scale_support)
             scale = self.cc_scale_transforms[slice_index](scale_support)
             scale = scale[:, :, :y_shape[0], :y_shape[1]]
             scale_list.append(scale)
-
-
-            _, y_slice_likelihood = self.gaussian_conditional(y_slice, scale, means = mu,training = tr)
+            _, y_slice_likelihood = self.gaussian_conditional(y_slice, scale, mu)
             y_likelihood.append(y_slice_likelihood)
-            #y_hat_slice = ste_round(y_slice - mu) + mu
-            y_hat_slice = self.gaussian_conditional.quantize(y_slice - mu, mode = "dequantize") + mu
-
+            y_hat_slice = ste_round(y_slice - mu) + mu
+            # if self.training:
+            #     lrp_support = torch.cat([mean_support + torch.randn(mean_support.size()).cuda().mul(scale_support), y_hat_slice], dim=1)
+            # else:
             lrp_support = torch.cat([mean_support, y_hat_slice], dim=1)
             lrp = self.lrp_transforms[slice_index](lrp_support)
             lrp = 0.5 * torch.tanh(lrp)
             y_hat_slice += lrp
 
             y_hat_slices.append(y_hat_slice)
-
-
-        y_gap = self.gaussian_conditional.quantize(y, mode ="training")
-        gap_gaussian = self.compute_gap(y,  y_gap)
-
 
         y_hat = torch.cat(y_hat_slices, dim=1)
         means = torch.cat(mu_list, dim=1)
@@ -444,24 +474,20 @@ class TCMSTanH(TCM):
         return {
             "x_hat": x_hat,
             "likelihoods": {"y": y_likelihoods, "z": z_likelihoods},
-            "para":{"means": means, "scales":scales, "y":y},
-            "gap":gap_gaussian
+            "para":{"means": means, "scales":scales, "y":y}
         }
 
-    def compute_gap(self, inputs, y_hat):
-        perm, _ = self.define_permutation(inputs)
-        values =  inputs.permute(*perm).contiguous() # flatten y and call it values
-        values = values.reshape(1, 1, -1) # reshape values      
-        y_hat_p =  y_hat.permute(*perm).contiguous() # flatten y and call it values
-        y_hat_p = y_hat_p.reshape(1, 1, -1) # reshape values     
-        with torch.no_grad():    
-            out = self.gaussian_conditional.stanh(values,-1) 
-            # calculate f_tilde:  
-            f_tilde = F.mse_loss(values, y_hat_p)
-            # calculat f_hat
-            f_hat = F.mse_loss(values, out)
-            gap = torch.abs(f_tilde - f_hat)
-        return gap
+    def load_state_dict(self, state_dict, strict = False):
+        
+        """
+        update_registered_buffers(
+            self.gaussian_conditional,
+            "gaussian_conditional",
+            ["_quantized_cdf", "_offset", "_cdf_length", "scale_table"],
+            state_dict,
+        )
+        """
+        super().load_state_dict(state_dict, strict = strict)
 
     @classmethod
     def from_state_dict(cls, state_dict):
@@ -486,13 +512,17 @@ class TCMSTanH(TCM):
 
         y_slices = y.chunk(self.num_slices, 1)
         y_hat_slices = []
+        y_scales = []
+        y_means = []
 
+        cdf = self.gaussian_conditional.quantized_cdf.tolist()
+        cdf_lengths = self.gaussian_conditional.cdf_length.reshape(-1).int().tolist()
+        offsets = self.gaussian_conditional.offset.reshape(-1).int().tolist()
 
+        encoder = BufferedRansEncoder()
         symbols_list = []
         indexes_list = []
         y_strings = []
-        cdfs = []
-       
 
         for slice_index, y_slice in enumerate(y_slices):
             support_slices = (y_hat_slices if self.max_support_slices < 0 else y_hat_slices[:self.max_support_slices])
@@ -507,15 +537,15 @@ class TCMSTanH(TCM):
             scale = self.cc_scale_transforms[slice_index](scale_support)
             scale = scale[:, :, :y_shape[0], :y_shape[1]]
 
+
+
+
+
             index = self.gaussian_conditional.build_indexes(scale)
 
-            #y_q_slice = self.gaussian_conditional.quantize(y_slice, "symbols", mu)
-            slice_string, output_cdf, _ = self.gaussian_conditional.compress(y_slice, index,  means = mu) 
-            cdfs.append(output_cdf)
-            
-            y_q_slice = self.gaussian_conditional.quantize(y_slice, mode = "symbols", means = mu)
-            y_q_slice = self.gaussian_conditional.dequantize(y_q_slice)
 
+    
+            y_q_slice = self.gaussian_conditional.quantize(y_slice, "symbols", mu)
             y_hat_slice = y_q_slice + mu
 
             symbols_list.extend(y_q_slice.reshape(-1).tolist())
@@ -528,18 +558,36 @@ class TCMSTanH(TCM):
             y_hat_slice += lrp
 
             y_hat_slices.append(y_hat_slice)
-            y_strings.append(slice_string)
+            y_scales.append(scale)
+            y_means.append(mu)
 
+        encoder.encode_with_indexes(symbols_list, indexes_list, cdf, cdf_lengths, offsets)
+        y_string = encoder.flush()
+        y_strings.append(y_string)
 
-        #encoder.encode_with_indexes(symbols_list, indexes_list, cdf, cdf_lengths, offsets)
-        #y_string = encoder.flush()
+        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
 
+    def _likelihood(self, inputs, scales, means=None):
+        half = float(0.5)
+        if means is not None:
+            values = inputs - means
+        else:
+            values = inputs
 
-        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:],"cdf":cdfs}
+        scales = torch.max(scales, torch.tensor(0.11))
+        values = torch.abs(values)
+        upper = self._standardized_cumulative((half - values) / scales)
+        lower = self._standardized_cumulative((-half - values) / scales)
+        likelihood = upper - lower
+        return likelihood
 
+    def _standardized_cumulative(self, inputs):
+        half = float(0.5)
+        const = float(-(2 ** -0.5))
+        # Using the complementary error function maximizes numerical precision.
+        return half * torch.erfc(const * inputs)
 
-
-    def decompress(self, strings, shape, cdfs):
+    def decompress(self, strings, shape):
         z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
         latent_scales = self.h_scale_s(z_hat)
         latent_means = self.h_mean_s(z_hat)
@@ -549,7 +597,9 @@ class TCMSTanH(TCM):
         y_string = strings[0][0]
 
         y_hat_slices = []
-
+        cdf = self.gaussian_conditional.quantized_cdf.tolist()
+        cdf_lengths = self.gaussian_conditional.cdf_length.reshape(-1).int().tolist()
+        offsets = self.gaussian_conditional.offset.reshape(-1).int().tolist()
 
         decoder = RansDecoder()
         decoder.set_stream(y_string)
@@ -568,12 +618,9 @@ class TCMSTanH(TCM):
 
             index = self.gaussian_conditional.build_indexes(scale)
 
-            #rv = self.gaussian_conditional.decompress(y_string[slice_index], scale, index) # decompress è giò qui dentro 
-            #rv =  self.gaussian_conditional.decompress(y_string[slice_index], cdfs[slice_index])
-            #rv = torch.Tensor(rv).reshape(1, -1, y_shape[0], y_shape[1]).to("cuda")
-            rv = torch.Tensor(cdfs[slice_index].type(torch.float)).reshape(1, -1, y_shape[0], y_shape[1]).to("cuda")
-            
-            y_hat_slice = rv + mu
+            rv = decoder.decode_stream(index.reshape(-1).tolist(), cdf, cdf_lengths, offsets)
+            rv = torch.Tensor(rv).reshape(1, -1, y_shape[0], y_shape[1])
+            y_hat_slice = self.gaussian_conditional.dequantize(rv, mu)
 
             lrp_support = torch.cat([mean_support, y_hat_slice], dim=1)
             lrp = self.lrp_transforms[slice_index](lrp_support)

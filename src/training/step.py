@@ -3,8 +3,21 @@ from utils.helper import AverageMeter, compute_msssim, compute_psnr, read_image
 import wandb
 from compressai.ops import compute_padding
 import torch.nn.functional as F
+import random
 
-def train_one_epoch(counter, model, criterion, train_dataloader, optimizer,  epoch, clip_max_norm, type='mse', annealing_strategy = None, aux_optimizer = None, wandb_log = False):
+def train_one_epoch(counter,
+                     model, 
+                     lambda_list, 
+                     criterion, 
+                     train_dataloader,
+                       optimizer,  
+                       epoch,
+                         clip_max_norm, 
+                         type='mse',
+                           annealing_strategy = None, 
+                           annealing_strategy_factorized = None,
+                           aux_optimizer = None, 
+                           wandb_log = False):
     model.train()
     device = next(model.parameters()).device
 
@@ -21,28 +34,53 @@ def train_one_epoch(counter, model, criterion, train_dataloader, optimizer,  epo
         if aux_optimizer is not None:
             aux_optimizer.zero_grad()
 
-        out_net = model(d)
+        p = random.randint(0, len(lambda_list) - 1)
+        out_net = model(d, lv = p)
 
-        out_criterion = criterion(out_net, d)
+        
+
+        out_criterion = criterion(out_net, d, p = lambda_list[p] )
         out_criterion["loss"].backward()
 
+
         if annealing_strategy is not None:
-            gap = out_net["gap"]
+            gap = out_net["gap_gaussian"]
             if annealing_strategy.type=="random":
                 annealing_strategy.step(gap = gap)
-                model.gaussian_conditional.stanh.beta = annealing_strategy.beta
+                model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
             else: 
                 lss = out_criterion["loss"].clone().detach().item()
                 annealing_strategy.step(gap, epoch, lss)
-                model.gaussian_conditional.stanh.beta = annealing_strategy.beta
+                model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
             
 
             if wandb_log:
                 wand_dict = {
                     "general_data/":counter,
-                    "general_data/gaussian_beta: ": model.gaussian_conditional.stanh.beta
+                    "general_data/gaussian_beta: ": model.gaussian_conditional[0].stanh.beta
                 }  
                 wandb.log(wand_dict)
+        
+
+        if annealing_strategy_factorized is not None: 
+
+            gap = out_net["gap_factorized"]
+            if annealing_strategy_factorized .type=="random":
+                annealing_strategy_factorized .step(gap = gap)
+                model.entropy_bottleneck.stanh.beta = annealing_strategy_factorized.beta
+            else: 
+                lss = out_criterion["loss"].clone().detach().item()
+                annealing_strategy_factorized .step(gap, epoch, lss)
+                model.entropy_bottleneck.stanh.beta = annealing_strategy_factorized.beta
+            
+
+            if wandb_log:
+                wand_dict = {
+                    "general_data/":counter,
+                    "general_data/factorized_beta: ": model.entropy_bottleneck.stanh.beta
+                }  
+                wandb.log(wand_dict)
+                  
 
             
 
@@ -112,7 +150,7 @@ def train_one_epoch(counter, model, criterion, train_dataloader, optimizer,  epo
     return counter
 
 
-def test_epoch(epoch, test_dataloader, model, criterion, wandb_log = True, valid = True):
+def test_epoch(epoch, test_dataloader, model,level,lmbda, criterion, wandb_log = True, valid = True):
     model.eval()
     device = next(model.parameters()).device
 
@@ -126,8 +164,8 @@ def test_epoch(epoch, test_dataloader, model, criterion, wandb_log = True, valid
     with torch.no_grad():
         for d in test_dataloader:
             d = d.to(device)
-            out_net = model(d)
-            out_criterion = criterion(out_net, d)
+            out_net = model(d, lv = level)
+            out_criterion = criterion(out_net, d, p = lmbda)
 
 
             bpp_loss.update(out_criterion["bpp_loss"])
@@ -153,12 +191,12 @@ def test_epoch(epoch, test_dataloader, model, criterion, wandb_log = True, valid
                 f"\tBpp loss: {bpp_loss.avg:.2f} |"
             )
             log_dict = {
-            "test":epoch,
-            "test/loss": loss.avg,
-            "test/bpp":bpp_loss.avg,
-            "test/mse": mse_loss.avg,
-            "test/psnr":psnr.avg,
-            "test/ssim":ssim.avg,
+            "test_" + str(level):epoch,
+           "test_" + str(level) + "/loss": loss.avg,
+            "test_" + str(level) + "/bpp":bpp_loss.avg,
+            "test_" + str(level) + "/mse": mse_loss.avg,
+            "test_" + str(level) + "/psnr":psnr.avg,
+            "test_" + str(level) + "/ssim":ssim.avg,
             }
         else:
 
@@ -169,12 +207,12 @@ def test_epoch(epoch, test_dataloader, model, criterion, wandb_log = True, valid
                 f"\tBpp loss: {bpp_loss.avg:.2f} |"
             )
             log_dict = {
-            "valid":epoch,
-            "valid/loss": loss.avg,
-            "valid/bpp":bpp_loss.avg,
-            "valid/mse": mse_loss.avg,
-            "valid/psnr":psnr.avg,
-            "valid/ssim":ssim.avg,
+            "valid_" +str(level) :epoch,
+            "valid_" +str(level) + "/loss": loss.avg,
+            "valid_" +str(level) + "/bpp":bpp_loss.avg,
+            "valid_" +str(level) + "/mse": mse_loss.avg,
+            "valid_" +str(level) + "/psnr":psnr.avg,
+            "valid_" +str(level) + "/ssim":ssim.avg,
             }       
 
         wandb.log(log_dict)

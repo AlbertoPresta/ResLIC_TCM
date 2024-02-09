@@ -18,6 +18,7 @@ class HypeEntropyModelSoS(nn.Module):
 
     def __init__(
         self,
+         removing_mean = False,
         likelihood_bound: float = 1e-9,
         entropy_coder: Optional[str] = None,
         entropy_coder_precision: int = 16,
@@ -28,7 +29,7 @@ class HypeEntropyModelSoS(nn.Module):
             entropy_coder = default_entropy_coder()
         self.entropy_coder = _EntropyCoder(entropy_coder)
         self.entropy_coder_precision = int(entropy_coder_precision)
-
+        self.removing_mean = removing_mean
         self.use_likelihood_bound = likelihood_bound > 0
         if self.use_likelihood_bound:
             self.likelihood_lower_bound = LowerBound(likelihood_bound)
@@ -106,7 +107,10 @@ class HypeEntropyModelSoS(nn.Module):
 
         if mode == "training":
 
+            outputs = inputs - means if (means is not None and self.removing_mean) else inputs
             outputs = self.stanh(inputs)
+            outputs = outputs + means if (means is not None and self.removing_mean) else outputs
+
 
             outputs =outputs.reshape(shape)
             outputs = outputs.permute(*perms[1]).contiguous()
@@ -144,8 +148,12 @@ class HypeEntropyModelSoS(nn.Module):
         
         for i in range(outputs.shape[0]):
             outputs[i] =  self.transform_map(outputs[i], map_float_to_int)
+            if i%1000==0:
+                print(i)
+        
 
-        outputs = outputs.reshape(shape_out)    
+        outputs = outputs.reshape(shape_out) 
+        outputs = outputs.to(dtype=torch.int)   
         return outputs
 
 
@@ -230,7 +238,9 @@ class HypeEntropyModelSoS(nn.Module):
             output_cdf[i,:] = self.cdf[indexes[i].item(),:]  
         return output_cdf 
     
-    def compress(self, inputs, indexes):
+    
+    """
+    def compress_old(self, inputs, indexes):
 
 
         symbols = inputs #[1,128,32,48]
@@ -252,8 +262,42 @@ class HypeEntropyModelSoS(nn.Module):
         #else:
         #    print("l'immagine è ok!")
         return byte_stream, c, shape_symbols 
+    """
     
 
+    def compress(self, symbols, indexes):
+        """
+        Compress input tensors to char strings.
+
+        Args:
+            inputs (torch.Tensor): input tensors
+            indexes (torch.IntTensor): tensors CDF indexes
+            means (torch.Tensor, optional): optional tensor means
+        """
+        #symbols = self.quantize(inputs, "symbols", means)
+
+        if len(symbols.size()) < 2:
+            raise ValueError(
+                "Invalid `inputs` size. Expected a tensor with at least 2 dimensions."
+            )
+
+        if symbols.size() != indexes.size():
+            raise ValueError("`inputs` and `indexes` should have the same size.")
+
+
+
+        strings = []
+
+        for i in range(symbols.size(0)):
+            rv = self.entropy_coder.encode_with_indexes(
+                symbols[i].reshape(-1).int().tolist(),
+                indexes[i].reshape(-1).int().tolist(),
+                self._quantized_cdf.tolist(),
+                self._cdf_length.reshape(-1).int().tolist(),
+                self._offset.reshape(-1).int().tolist(),
+            )
+            strings.append(rv)
+        return strings
 
 
 
@@ -266,31 +310,19 @@ class HypeEntropyModelSoS(nn.Module):
 
 
 class GaussianConditionalStanh(HypeEntropyModelSoS):
-    r"""Gaussian conditional layer, introduced by J. Ballé, D. Minnen, S. Singh,
-    S. J. Hwang, N. Johnston, in `"Variational image compression with a scale
-    hyperprior" <https://arxiv.org/abs/1802.01436>`_.
-    This is a re-implementation of the Gaussian conditional layer in
-    *tensorflow/compression*. See the `tensorflow documentation
-    <https://tensorflow.github.io/compression/docs/api_docs/python/tfc/GaussianConditional.html>`__
-    for more information.
-    """
 
     def __init__(
         self,
+        
         scale_table: Optional[Union[List, Tuple]],
         *args: Any,
-        channels: int = 128, 
-        num_sigmoids: int = 1,
-        symmetry = False,
-        beta: int = 1,      
-        extrema: int = 10,
         scale_bound: float = 0.11,
-        tail_mass: float = 1e-9,
-        trainable = True,
-        device = torch.device("cuda"),
+        tail_mass: float = 1e-9, 
+        gaussian_configuration = None,    
+        channels: int = 128, 
         **kwargs: Any,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(removing_mean = gaussian_configuration["removing_mean"], *args, **kwargs)
 
         if not isinstance(scale_table, (type(None), list, tuple)):
             raise ValueError(f'Invalid type for scale_table "{type(scale_table)}"')
@@ -320,19 +352,20 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
             torch.Tensor([float(scale_bound)]) if scale_bound is not None else None,
         )
 
+
         self.channels = int(channels)
         self.M = int(channels)
         self.tail_mass = float(tail_mass)
-        self.num_sigmoids = int(num_sigmoids)
+        self.num_sigmoids = int(gaussian_configuration["num_sigmoids"])
 
-        self.extrema = extrema
-        self.symmetry = symmetry
+        self.extrema = gaussian_configuration["extrema"]
+        self.symmetry = gaussian_configuration["symmetry"]
 
 
         if self.symmetry is False: 
-            self.stanh = NonSymStanH(beta,self.num_sigmoids, extrema = self.extrema, trainable= trainable)
+            self.stanh = NonSymStanH(gaussian_configuration["beta"],self.num_sigmoids, extrema = self.extrema, trainable= gaussian_configuration["trainable"])
         else:
-            self.stanh = SymStanH(beta,self.num_sigmoids, extrema = self.extrema, trainable= trainable)
+            self.stanh = SymStanH(gaussian_configuration["beta"],self.num_sigmoids, extrema = self.extrema, trainable= gaussian_configuration["trainable"])
 
           
     @staticmethod
@@ -360,6 +393,7 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
         return True
 
     
+    
     def update(self, device = torch.device("cuda")):
 
 
@@ -380,6 +414,8 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
         samples = self.stanh.cum_w
         samples = samples.repeat(self.scale_table.shape[0],1)
         samples = samples.to(device)
+
+        print("dio cristo: ",samples)
 
         self._offset = -self.stanh.cum_w[0]
 
@@ -599,10 +635,20 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
         if perms is None:
             perms = self.define_permutation(x)
 
+        x = self.quantize(x, "symbols", means = means, perms = perms)
+        return super().compress(x,indexes)
+        #x = self.quantize(x, "symbols", means = means, perms = perms)  
+        #byte_stream, c, shape_symbols  = super().compress(x, indexes)  #ddddd
+        #return byte_stream, c, shape_symbols
 
-        x = self.quantize(x, "symbols", means = means, perms = perms)  
-        byte_stream, c, shape_symbols  = super().compress(x, indexes)  #ddddd
-        return byte_stream, c, shape_symbols
+
+
+    def decompress(self, strings, size):
+        output_size = (len(strings), self._quantized_cdf.size(0), *size)
+        indexes = self._build_indexes(output_size).to(self._quantized_cdf.device)
+        medians = self._extend_ndims(self._get_medians().detach(), len(size))
+        medians = medians.expand(len(strings), *([-1] * (len(size) + 1)))
+        return super().decompress(strings, indexes, medians,0)
 
 
 
@@ -628,11 +674,63 @@ class GaussianConditionalStanh(HypeEntropyModelSoS):
         return outputs
     """
 
+    def decompress(self, strings, indexes, means=None, flag=1):
+        """
+        Decompress char strings to tensors.
 
-    def decompress(self, byte_stream,  output_cdf):
+        Args:
+            strings (str): compressed tensors
+            indexes (torch.IntTensor): tensors CDF indexes
+            means (torch.Tensor, optional): optional tensor means
+        """
+
+        if not isinstance(strings, (tuple, list)):
+            raise ValueError("Invalid `strings` parameter type.")
+
+        if not len(strings) == indexes.size(0):
+            raise ValueError("Invalid strings or indexes parameters")
+
+        if len(indexes.size()) < 2:
+            raise ValueError(
+                "Invalid `indexes` size. Expected a tensor with at least 2 dimensions."
+            )
+
+
+
+        if means is not None:
+            if means.size()[:2] != indexes.size()[:2]:
+                raise ValueError("Invalid means or indexes parameters")
+            if means.size() != indexes.size():
+                for i in range(2, len(indexes.size())):
+                    if means.size(i) != 1:
+                        raise ValueError("Invalid means parameters")
+
+        cdf = self._quantized_cdf
+        outputs = cdf.new_empty(indexes.size())
+
+        for i, s in enumerate(strings):
+            values = self.entropy_coder.decode_with_indexes(
+                s,
+                indexes[i].reshape(-1).int().tolist(),
+                cdf.tolist(),
+                self._cdf_length.reshape(-1).int().tolist(),
+                self._offset.reshape(-1).int().tolist(),
+            )
+            outputs[i] = torch.tensor(
+                values, device=outputs.device, dtype=outputs.dtype
+            ).reshape(outputs[i].size())
+
+
+        outputs = self.dequantize(outputs, means = means)
+        return outputs
+
+
+    """
+    def decompress_old(self, byte_stream,  output_cdf):
         #outputs = super().decompress(byte_stream, output_cdf) 
 
 
         outputs =   torchac.decode_float_cdf(output_cdf, byte_stream)
         #outputs = outputs.to("cuda")
         return outputs
+    """

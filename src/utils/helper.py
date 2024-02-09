@@ -13,19 +13,37 @@ def compute_psnr(a, b):
     mse = torch.mean((a - b)**2).item()
     return -10 * math.log10(mse)
 
-def configure_latent_space_policy(args):
+def configure_latent_space_policy(args, multi = False):
+    if multi is False:
+        gauss_tr = True if args.gauss_trainable == "yes" else False
+        gaussian_configuration = {
+                    "beta": args.gauss_beta, 
+                    "num_sigmoids": args.gauss_num_sigmoids, 
+                    "annealing": args.gauss_annealing, 
+                    "symmetry": args.symmetry, 
+                    "gap_factor": args.gauss_gp ,
+                    "extrema": args.gauss_extrema ,
+                "trainable":gauss_tr ,
+                "removing_mean":args.removing_mean  #dddd      
+                }
+        return  gaussian_configuration
+    else: 
+        gaussian_configuration = []
+        for i in range(len(args.lambda_list)):
+            gauss_tr = True if args.gauss_trainable[i] == "yes" else False
+            gaussian_configuration.append({
+                        "beta": args.gauss_beta[i], 
+                        "num_sigmoids": args.gauss_num_sigmoids[i], 
+                        "annealing": args.gauss_annealing[i], 
+                        "symmetry": args.symmetry, 
+                        "gap_factor": args.gauss_gp[i] ,
+                        "extrema": args.gauss_extrema[i] ,
+                    "trainable":gauss_tr ,
+                    "removing_mean":args.removing_mean #dddd      
+                    }
+                )
+        return  gaussian_configuration
 
-    gaussian_configuration = {
-                "beta": args.gauss_beta, 
-                "num_sigmoids": args.gauss_num_sigmoids, 
-                "annealing": args.gauss_annealing, 
-                "symmetry": args.symmetry, 
-                "gap_factor": args.gauss_gp ,
-                "extrema": args.gauss_extrema ,
-            "trainable":args.gauss_tr         
-            }
-
-    return  gaussian_configuration
 
 
 
@@ -36,7 +54,7 @@ from os.path import join
 def create_savepath(args,epoch,base_path):
     now = datetime.now()
     date_time = now.strftime("%m%d")
-    c = join(date_time,"_lambda_",str(args.lmbda),"_epoch_",str(epoch)).replace("/","_")
+    c = join(date_time,"_lambda_",str(args.lambda_list[0]),"_epoch_",str(epoch)).replace("/","_")
 
     
     c_best = join(c,"best").replace("/","_")
@@ -50,7 +68,7 @@ def create_savepath(args,epoch,base_path):
     
     print("savepath: ",savepath)
     print("savepath best: ",savepath_best)
-    very_best = savepath_best = join(base_path,"_very_best.pth.tar")
+    very_best  = join(base_path,"_very_best.pth.tar")
     return savepath, savepath_best,very_best
 
 

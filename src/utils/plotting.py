@@ -3,36 +3,64 @@ import torch
 import wandb
 
 
-def plot_sos(model, device,epoch,n = 1000):
+def plot_sos(model, device,epoch,symmetry = False,lv = 0,n = 1000):
 
 
-
-    x_min = float((min(model.gaussian_conditional.stanh.b) + min(model.gaussian_conditional.stanh.b)*0.5).detach().cpu().numpy())
-    x_max = float((max(model.gaussian_conditional.stanh.b)+ max(model.gaussian_conditional.stanh.b)*0.5).detach().cpu().numpy())
-    step = (x_max-x_min)/n
-    x_values = torch.arange(x_min - 30, x_max -30, step)
-    x_values = x_values.repeat(model.gaussian_conditional.M,1,1)
-            
-    y_values=model.gaussian_conditional.stanh(x_values.to(device))[0,0,:]
-    data = [[x, y] for (x, y) in zip(x_values[0,0,:],y_values)]
-    table = wandb.Table(data=data, columns = ["x", "sos"])
-
-    log_dict = { "StanH":epoch,
-                "StanH/quantizer_soft": wandb.plot.line(table, "x", "sos", title='GaussianSoS/Gaussian SoS  with beta = {}'.format(model.gaussian_conditional.stanh.beta))
+    if symmetry is False:
+        x_min = float((min(model.gaussian_conditional[lv].stanh.b) + min(model.gaussian_conditional[lv].stanh.b)*0.5).detach().cpu().numpy())
+        x_max = float((max(model.gaussian_conditional[lv].stanh.b)+ max(model.gaussian_conditional[lv].stanh.b)*0.5).detach().cpu().numpy())
+        step = (x_max-x_min)/n
+        x_values = torch.arange(x_min - 30, x_max -30, step)
+        x_values = x_values.repeat(model.gaussian_conditional[lv].M,1,1)
                 
-    }
+        y_values=model.gaussian_conditional[lv].stanh(x_values.to(device))[0,0,:]
+        data = [[x, y] for (x, y) in zip(x_values[0,0,:],y_values)]
+        table = wandb.Table(data=data, columns = ["x", "sos"])
 
-    wandb.log(log_dict)
+        log_dict = { "StanH":epoch,
+                    "StanH/quantizer_soft_"+str(lv) : wandb.plot.line(table, "x", "sos", title='GaussianSoS/Gaussian SoS  with beta = {}'.format(model.gaussian_conditional[lv].stanh.beta))
+                    
+        }
 
-    
-    y_values= model.gaussian_conditional.stanh(x_values.to(device), -1)[0,0,:]
-    data_inf = [[x, y] for (x, y) in zip(x_values[0,0,:],y_values)]
-    table_inf = wandb.Table(data=data_inf, columns = ["x", "sos"])
-    log_dict = { "StanH":epoch,
-                "StanH/actual_quantizer": wandb.plot.line(table_inf, "x", "sos")
+        wandb.log(log_dict)
+
+        
+        y_values= model.gaussian_conditional[lv].stanh(x_values.to(device), -1)[0,0,:]
+        data_inf = [[x, y] for (x, y) in zip(x_values[0,0,:],y_values)]
+        table_inf = wandb.Table(data=data_inf, columns = ["x", "sos"])
+        log_dict = { "StanH":epoch,
+                    "StanH/actual_quantizer_" +str(lv): wandb.plot.line(table_inf, "x", "sos")
+                    
+        }
+        wandb.log(log_dict)
+    else:
+        x_min = float((min(model.gaussian_conditional.stanh.sym_b) + min(model.gaussian_conditional.stanh.sym_b)*0.5).detach().cpu().numpy())
+        x_max = float((max(model.gaussian_conditional.stanh.sym_b)+ max(model.gaussian_conditional.stanh.sym_b)*0.5).detach().cpu().numpy())
+        step = (x_max-x_min)/n
+        x_values = torch.arange(x_min - 30, x_max -30, step)
+        x_values = x_values.repeat(model.gaussian_conditional.M,1,1)
                 
-    }
-    wandb.log(log_dict)
+        y_values=model.gaussian_conditional.stanh(x_values.to(device))[0,0,:]
+        data = [[x, y] for (x, y) in zip(x_values[0,0,:],y_values)]
+        table = wandb.Table(data=data, columns = ["x", "sos"])
+
+        log_dict = { "StanH":epoch,
+                    "StanH/quantizer_soft_": wandb.plot.line(table, "x", "sos", title='GaussianSoS/Gaussian SoS  with beta = {}'.format(model.gaussian_conditional.stanh.beta))
+                    
+        }
+
+        wandb.log(log_dict)
+
+        
+        y_values= model.gaussian_conditional.stanh(x_values.to(device), -1)[0,0,:]
+        data_inf = [[x, y] for (x, y) in zip(x_values[0,0,:],y_values)]
+        table_inf = wandb.Table(data=data_inf, columns = ["x", "sos"])
+        log_dict = { "StanH":epoch,
+                    "StanH/actual_quantizer": wandb.plot.line(table_inf, "x", "sos")
+                    
+        }
+        wandb.log(log_dict)
+
 
 
 
@@ -82,7 +110,7 @@ def plot_rate_distorsion(bpp_res, psnr_res,epoch):
         colore = legenda[type_name]["colore"][0]
         leg = legenda[type_name]["legends"]
 
-    
+        print(type_name," zio caro: ",type(bpp)," ",type(psnr),"  ")
         plt.plot(bpp,psnr,"-" ,color = colore, label =  leg ,markersize=7)
         #for x, y, marker, markersize_t in zip(bpp, psnr, symbols, markersize):
         plt.plot(bpp, psnr, marker="o", markersize=7, color =  colore)

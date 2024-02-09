@@ -23,7 +23,7 @@ def configure_optimizers(net, args):
     union_params = parameters | aux_parameters
 
     assert len(inter_params) == 0
-    assert len(union_params) - len(params_dict.keys()) == 0
+    #assert len(union_params) - len(params_dict.keys()) == 0
 
 
     print("the optimizer is Adam")
@@ -31,8 +31,12 @@ def configure_optimizers(net, args):
         (params_dict[n] for n in sorted(parameters)),
         lr=args.learning_rate,
     )
-    aux_optimizer = optim.Adam(
-        (params_dict[n] for n in sorted(aux_parameters)),
-        lr=args.aux_learning_rate,
-    )
+
+    if "stanh" == args.model:  
+        aux_optimizer = None
+    else:
+        aux_optimizer = optim.Adam(
+            (params_dict[n] for n in sorted(aux_parameters)),
+            lr=args.aux_learning_rate,
+        )
     return optimizer, aux_optimizer

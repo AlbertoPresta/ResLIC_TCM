@@ -208,6 +208,8 @@ class SymStanH(nn.Module):
 
         self.update_state()
 
+        print("gli scalini iniziali sono: ",self.cum_w)
+
 
     def update_weights(self):
         self.sym_w =  torch.cat((torch.flip(self.w,[0]),self.w),0)
@@ -247,13 +249,13 @@ class SymStanH(nn.Module):
         
 
 
-    def define_channels_map_prova(self ):
+    def define_channels_map(self ):
 
         minimum = -int(self.cum_w.shape[0])//2
         maximum = -minimum
-        mapping = torch.arange(minimum, maximum, 1).numpy()
-        map_float_to_int = dict(zip(list(self.cum_w.detach().cpu().numpy()),list(mapping)))
-        map_int_to_float = dict(zip(list(mapping),list(self.cum_w.detach().cpu().numpy())))            
+        mapping = torch.arange(minimum, maximum, 1).numpy().astype(int)
+        map_float_to_int = dict(zip(list(self.cum_w.detach().cpu().numpy()),list(mapping + 1) ))
+        map_int_to_float = dict(zip(list(mapping+ 1) ,list(self.cum_w.detach().cpu().numpy())))            
         self.map_sos_cdf = map_float_to_int
         self.map_cdf_sos = map_int_to_float
         print("----------------------------------------------------------------------------------------------------")
@@ -265,7 +267,7 @@ class SymStanH(nn.Module):
 
 
 
-    def define_channels_map(self ):
+    def define_channels_map2(self ):
 
 
         mapping = torch.arange(0, int(self.cum_w.shape[0]), 1).numpy()
