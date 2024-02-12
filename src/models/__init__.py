@@ -1,7 +1,7 @@
 from .reference.tcm import TCM
 from .stanh.tcm_stanh import TCMSTanH 
-from .Balle2018 import ScaleHyperpriorStanH
-from .GainBalle2018 import GainedScaleHyperprior
+from .stanh.balle18_stanh import ScaleHyperpriorStanH
+from .gain.GainBalle2018 import GainedScaleHyperprior
 from .gain.gain_wacnn import gain_WACNN
 from .stanh.wacnn_stanh import WACNN_stanh
 

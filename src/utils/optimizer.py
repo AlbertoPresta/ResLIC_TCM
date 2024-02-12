@@ -32,7 +32,7 @@ def configure_optimizers(net, args):
         lr=args.learning_rate,
     )
 
-    if "stanh" == args.model:  
+    if "stanh" in args.model and args.factorized_stanh is False:  
         aux_optimizer = None
     else:
         aux_optimizer = optim.Adam(

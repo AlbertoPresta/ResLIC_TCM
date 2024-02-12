@@ -55,9 +55,9 @@ class TestKodakDataset(Dataset):
 
 
 def delete_keys(state_dict):
-    #del state_dict["entropy_bottleneck._cdf_length"]
-    #del state_dict["entropy_bottleneck._quantized_cdf"]
-    #del state_dict["entropy_bottleneck._offset"]
+    del state_dict["entropy_bottleneck._cdf_length"]
+    del state_dict["entropy_bottleneck._quantized_cdf"]
+    del state_dict["entropy_bottleneck._offset"]
 
     del state_dict["gaussian_conditional._cdf_length"]
     del state_dict["gaussian_conditional._quantized_cdf"]
@@ -67,14 +67,13 @@ def delete_keys(state_dict):
     return state_dict
 
 
-def save_checkpoint(state, is_best, filename,filename_best,very_best,epoch):
+def save_checkpoint(state, is_best, filename,filename_best,very_best):
 
 
     if is_best:
         torch.save(state, filename_best)
         torch.save(state, very_best)
-        if epoch > 150:
-            wandb.save(very_best)
+        wandb.save(very_best)
     else:
         torch.save(state, filename)
 
@@ -83,19 +82,21 @@ def save_checkpoint(state, is_best, filename,filename_best,very_best,epoch):
 def get_model(args,device):
 
     if args.model == "wacnn_stanh":
-        gaussian_configuration = configure_latent_space_policy(args,multi = True)
+        gaussian_configuration = configure_latent_space_policy(args,multi = True if len(args.lambda_list) > 1 else False )
         annealing_strategy_gaussian =  configure_annealings(gaussian_configuration[0])
         factorized_configuration = None 
-        annealing_strategy_factorized = None     
+        annealing_strategy_factorized = None 
+
         net = WACNN_stanh( N = args.N, 
                           M = args.M,
-                          multiple_decoder = args.multiple_decoder,
-                          gaussian_configuration=gaussian_configuration, 
+                          refinement = args.refinement,
+                          gaussian_configuration=gaussian_configuration if len(args.lambda_list) > 1 else gaussian_configuration[0], 
                           lambda_list = args.lambda_list )
         net = net.to(device)
         return net, gaussian_configuration, annealing_strategy_gaussian, factorized_configuration, annealing_strategy_factorized
 
     elif args.model == "stanh":
+
         gaussian_configuration = configure_latent_space_policy(args)
         annealing_strategy_gaussian =  configure_annealings(gaussian_configuration)
 
@@ -107,14 +108,19 @@ def get_model(args,device):
         net = net.to(device)
         return net, gaussian_configuration, annealing_strategy_gaussian
     elif args.model == "scale_stanh":
-        gaussian_configuration = configure_latent_space_policy(args)
+        if args.checkpoint != "none":
+            new_args = torch.load(args.checkpoint, map_location=device)["args"]
+        else:
+            new_args = args
+        gaussian_configuration = configure_latent_space_policy(new_args)
+
         annealing_strategy_gaussian =  configure_annealings(gaussian_configuration)
         factorized_configuration = gaussian_configuration
         annealing_strategy_factorized = configure_annealings(gaussian_configuration)
 
-        net = ScaleHyperpriorStanH(N = args.N, M = args.M,gaussian_configuration=gaussian_configuration)
+        net = ScaleHyperpriorStanH(N = new_args.N, M = new_args.M,gaussian_configuration=gaussian_configuration)
         net = net.to(device)
-        #net.update()
+        
 
         if args.quality != 0:
 
@@ -190,15 +196,14 @@ def main(argv):
     psnr_res = {}
     bpp_res = {}
 
-    if args.freeze:
-        bpp_res["our"] = [0.3055]
-        psnr_res["our"] = [32.529]
-    else:
-        bpp_res["our"] = [100]
-        psnr_res["our"] = [0]
 
-    psnr_res["base"] =   [32.529, 30.57, 29.99]
-    bpp_res["base"] =  [0.3055,0.198, 0.161]  
+
+    psnr_res["base"] =   [29.22,30.59,32.26,34.15,35.91,37.72][::-1]
+    bpp_res["base"] =  [0.127,0.199,0.309,0.449,0.649,0.895][::-1]
+
+
+
+
 
 
     train_dataset = ImageFolder(args.dataset,num_images = args.num_images, split="train", transform=train_transforms)
@@ -254,8 +259,13 @@ def main(argv):
     last_epoch = 0
     if args.checkpoint != "none":  # load from previous checkpoint
         print("Loading", args.checkpoint)
+
+
+        
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        net.load_state_dict(checkpoint["state_dict"], strict = False)
+        state_dict = delete_keys(checkpoint["state_dict"])
+        net.load_state_dict(state_dict, strict = False)
+        net.update()
         #if args.continue_train:
         #    last_epoch = checkpoint["epoch"] + 1
         #    optimizer.load_state_dict(checkpoint["optimizer"])
@@ -265,8 +275,10 @@ def main(argv):
     best_loss = float("inf")
 
     if args.freeze:
-        net.freeze()
+        net.unlock_only_stanh()
         aux_optimizer = None
+        net.entropy_bottleneck.stanh.define_channels_map()
+        net.gaussian_conditional.stanh.define_channels_map()
     epoch_enc = 0
 
     #net.gaussian_conditional.stanh.define_channels_map()
@@ -277,6 +289,14 @@ def main(argv):
     num_levels = len(lambda_list)
 
 
+    tp = net.print_information()
+
+    if args.tester: 
+
+        test_bpp, test_psnr,loss = test_epoch(0, test_dataloader, net,0,lambda_list[0], criterion, wandb_log=False, valid = False)
+        print(test_bpp)
+        print(test_psnr)
+        return 0 
 
     for epoch in range(last_epoch, args.epochs):
         start = time.time()
@@ -301,8 +321,11 @@ def main(argv):
         print("inizio validation!!!")
         val_loss = 0
         
+
+        bpp_res["our"] = []
+        psnr_res["our"] = []
         for j,p in enumerate(lambda_list):
-            val_bpp, val_psnr,valid_loss = test_epoch(epoch, valid_dataloader, net,j,p, criterion, wandb_log=True, valid = True)
+            _, _,valid_loss = test_epoch(epoch, valid_dataloader, net,j,p, criterion, wandb_log=True, valid = True)
             test_bpp, test_psnr,loss = test_epoch(epoch, test_dataloader, net,j,p, criterion, wandb_log=True, valid = False)
             val_loss = val_loss + valid_loss 
             #test_bpp = test_bpp.clone().detach()
@@ -323,26 +346,17 @@ def main(argv):
 
         test_bpp = test_bpp.clone().detach().item()
 
-        #net.update()
-        #print("inizio la compressione")
-        #bpp, psnr  = compress_with_ac(net, filelist, device, epoch, baseline = False, wandb_log = True)
-        #print("compression results: ",bpp,"   ",psnr)
+
 
         if is_best and "stanh" in args.model: #and np.abs(test_bpp - bpp_res["our"][-1])>0.01:
             
-            """
-            if args.freeze:
-                bpp_res["our"].append(test_bpp)
-                psnr_res["our"].append(test_psnr)
-            else:
-                bpp_res["our"] = [test_bpp]
-                psnr_res["our"]= [test_psnr]
-            """
-            #model, device,epoch
+
             for j,p in enumerate(lambda_list):
-                plot_sos(net,device,epoch_enc,lv = j)
+                #plot_sos(net,device,epoch_enc,lv = j)
+
+
                 print("finito primo plot")
-                #plot_rate_distorsion(bpp_res, psnr_res,epoch_enc)
+                plot_rate_distorsion(bpp_res, psnr_res,epoch_enc)
                 print("finito secondo plot")
                 epoch_enc +=1
 
@@ -352,7 +366,7 @@ def main(argv):
             check = "zero"
 
         # creating savepath
-        name_folder = check + "_" +   args.model  + "_" + str(args.N)  + "_" + str(args.symmetry) + "_" + str(args.gauss_gp)
+        name_folder = check +  args.model  + "_" + str(args.N)  + "_" + str(args.symmetry) + "_" + str(args.gauss_gp) + "_" + args.refinement
         cartella = os.path.join(args.save_path,name_folder)
 
 
@@ -382,7 +396,6 @@ def main(argv):
                 filename,
                 filename_best,
                 very_best,
-                epoch
             )
     
 

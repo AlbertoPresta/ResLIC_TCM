@@ -8,7 +8,7 @@ from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.layers import GDN, MaskedConv2d
 
 
-from .base import CompressionModel
+from ..base import CompressionModel
 from .gain_utils import get_scale_table, conv, deconv, update_registered_buffers 
 from entropy_models import GaussianConditionalStanh
 

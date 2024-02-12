@@ -47,17 +47,18 @@ def train_one_epoch(counter,
             gap = out_net["gap_gaussian"]
             if annealing_strategy.type=="random":
                 annealing_strategy.step(gap = gap)
-                model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
+                model.gaussian_conditional.stanh.beta = annealing_strategy.beta
             else: 
                 lss = out_criterion["loss"].clone().detach().item()
                 annealing_strategy.step(gap, epoch, lss)
-                model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
+                #model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
+                model.gaussian_conditional.stanh.beta = annealing_strategy.beta
             
 
             if wandb_log:
                 wand_dict = {
                     "general_data/":counter,
-                    "general_data/gaussian_beta: ": model.gaussian_conditional[0].stanh.beta
+                    "general_data/gaussian_beta: ":model.gaussian_conditional.stanh.beta #model.gaussian_conditional[p].stanh.beta
                 }  
                 wandb.log(wand_dict)
         
@@ -106,10 +107,6 @@ def train_one_epoch(counter,
             wandb.log(wand_dict)
 
         
-
-
-
-
 
         if aux_optimizer is not None:
             aux_loss = model.aux_loss()
@@ -164,7 +161,7 @@ def test_epoch(epoch, test_dataloader, model,level,lmbda, criterion, wandb_log =
     with torch.no_grad():
         for d in test_dataloader:
             d = d.to(device)
-            out_net = model(d, lv = level)
+            out_net = model(d, tr = False ,lv = level)
             out_criterion = criterion(out_net, d, p = lmbda)
 
 
@@ -218,11 +215,6 @@ def test_epoch(epoch, test_dataloader, model,level,lmbda, criterion, wandb_log =
         wandb.log(log_dict)
 
     return bpp_loss.avg, psnr.avg , loss.avg
-
-
-
-
-
 
 
 

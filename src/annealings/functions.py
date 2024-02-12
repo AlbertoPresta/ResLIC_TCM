@@ -16,7 +16,7 @@ class StanhAnnealings(nn.Module):
                         mode = "min",
                         threshold_mode = "abs",
                         patience = 10,
-                        max_beta = 1e3,
+                        max_beta = 1000,
                         starting_epochs = -1):
 
 
@@ -106,7 +106,10 @@ class StanhAnnealings(nn.Module):
                 
             self.update_gap(gap)
             self.beta_max = self.beta_max + self.factor*self.gap
-            self.beta = torch.empty_like(torch.tensor([0.0])).uniform_(1,  self.beta_max).item()    
+            if self.beta_max > self.max_beta:
+                self.beta = torch.empty_like(torch.tensor([0.0])).uniform_(1,  self.max_beta).item()
+            else:
+                self.beta = torch.empty_like(torch.tensor([0.0])).uniform_(1,  self.beta_max).item()   
             
         elif self.type == "loss":
             self.update_loss(lss)
@@ -217,7 +220,7 @@ class AugmentBetaOnPlateau(nn.Module):
                 max_beta = 1e5):
         super().__init__()
         if factor < 1.0:
-            raise ValueError("Factor should be > 1.0")
+            raise ValueError("Factor should be > 1.0") #dddddddddddddd
         
 
 

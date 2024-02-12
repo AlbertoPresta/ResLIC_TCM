@@ -135,11 +135,13 @@ class WACNN_stanh(WACNN):
                  lambda_list, 
                  N=192, 
                  M=320,
-                 multiple_decoder = True,
+                 refinement = "none",
                  **kwargs):
         super().__init__(N = N, M = M ,**kwargs)
 
-        self.multiple_decoder = multiple_decoder
+
+        assert refinement in ["none","convolution","multiple"]
+        self.refinement = refinement
         self.lmbda = lambda_list
         self.levels = len(self.lmbda)
 
@@ -152,7 +154,7 @@ class WACNN_stanh(WACNN):
                                                 )
         
 
-        if self.multiple_decoder:
+        if self.refinement == "multiple":
             self.g_s = nn.ModuleList(nn.Sequential(
                 Win_noShift_Attention(dim=M, num_heads=8, window_size=4, shift_size=2),
                 deconv(M, N, kernel_size=5, stride=2),
@@ -166,6 +168,13 @@ class WACNN_stanh(WACNN):
             )
             for _ in range(self.levels)
             )
+        elif self.refinement == "convolution":
+            self.refine_layer = nn.ModuleList(nn.Conv2d(in_channels=M,
+                                                       out_channels=M,
+                                                         kernel_size=1, 
+                                                         stride=1, 
+                                                         padding=0)
+                                            for _ in range(self.levels))
         else: 
             self.g_s = nn.Sequential(
                 Win_noShift_Attention(dim=M, num_heads=8, window_size=4, shift_size=2),
@@ -183,9 +192,12 @@ class WACNN_stanh(WACNN):
     def print_information(self):
         print(" g_a: ",sum(p.numel() for p in self.g_a.parameters()))
 
-        if self.multiple_decoder:
+        if self.refinement == "multiple":
             for i in range(self.levels):
                 print(" g_s " + str(i) + " :",sum(p.numel() for p in self.g_s[i].parameters()))
+        elif self.refinement == "convolution":
+            for i in range(self.levels):
+                print("refinement " + str(i),": ",sum(p.numel() for p in self.refine_layer[i].parameters()))
 
         print(" h_a: ",sum(p.numel() for p in self.h_a.parameters()))
 
@@ -291,8 +303,11 @@ class WACNN_stanh(WACNN):
         gap_gaussian = self.compute_gap(y,  y_gap, lv)
 
         y_likelihoods = torch.cat(y_likelihood, dim=1)
-        if self.multiple_decoder:
+        if self.refinement == "multiple":
             x_hat = self.g_s[lv](y_hat)
+        elif self.refinement == "convolution":
+            y_hat = self.refine_layer[lv](y_hat)
+            x_hat = self.g_s(y_hat)
         else:
             x_hat = self.g_s(y_hat)
 

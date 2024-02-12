@@ -18,7 +18,7 @@ class HypeEntropyModelSoS(nn.Module):
 
     def __init__(
         self,
-         removing_mean = False,
+         removing_mean = True,
         likelihood_bound: float = 1e-9,
         entropy_coder: Optional[str] = None,
         entropy_coder_precision: int = 16,

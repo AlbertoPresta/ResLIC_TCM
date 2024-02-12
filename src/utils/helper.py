@@ -15,18 +15,18 @@ def compute_psnr(a, b):
 
 def configure_latent_space_policy(args, multi = False):
     if multi is False:
-        gauss_tr = True if args.gauss_trainable == "yes" else False
+        gauss_tr = True if args.gauss_trainable[0] == "yes" else False
         gaussian_configuration = {
-                    "beta": args.gauss_beta, 
-                    "num_sigmoids": args.gauss_num_sigmoids, 
-                    "annealing": args.gauss_annealing, 
+                    "beta": args.gauss_beta[0] if isinstance(args.gauss_beta,list) else args.gauss_beta, 
+                    "num_sigmoids": args.gauss_num_sigmoids[0] if isinstance(args.gauss_num_sigmoids,list) else args.gauss_num_sigmoids, 
+                    "annealing": args.gauss_annealing[0] if isinstance(args.gauss_annealing,list) else args.gauss_annealing, 
                     "symmetry": args.symmetry, 
-                    "gap_factor": args.gauss_gp ,
-                    "extrema": args.gauss_extrema ,
+                    "gap_factor": args.gauss_gp[0] if isinstance(args.gauss_gp,list) else args.gauss_gp,
+                    "extrema": args.gauss_extrema[0] if isinstance(args.gauss_extrema,list) else args.gauss_extrema ,
                 "trainable":gauss_tr ,
                 "removing_mean":args.removing_mean  #dddd      
                 }
-        return  gaussian_configuration
+        return  gaussian_configuration #[gaussian_configuration]
     else: 
         gaussian_configuration = []
         for i in range(len(args.lambda_list)):

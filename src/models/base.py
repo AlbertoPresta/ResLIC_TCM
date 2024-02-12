@@ -64,7 +64,7 @@ class CompressionModel(nn.Module):
                     ["_quantized_cdf", "_offset", "_cdf_length"],
                     state_dict,
                 )
-            """
+            
             if isinstance(module, GaussianConditional):
                 update_registered_buffers(
                     module,
@@ -72,7 +72,7 @@ class CompressionModel(nn.Module):
                     ["_quantized_cdf", "_offset", "_cdf_length", "scale_table"],
                     state_dict,
                 )
-            """
+            
 
         return nn.Module.load_state_dict(self, state_dict, strict=strict)
 

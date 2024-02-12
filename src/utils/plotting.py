@@ -110,9 +110,11 @@ def plot_rate_distorsion(bpp_res, psnr_res,epoch):
         colore = legenda[type_name]["colore"][0]
         leg = legenda[type_name]["legends"]
 
-        print(type_name," zio caro: ",type(bpp)," ",type(psnr),"  ")
+        bpp = torch.tensor(bpp).cpu().numpy()
+        psnr = torch.tensor(psnr).cpu().numpy()
+
+        
         plt.plot(bpp,psnr,"-" ,color = colore, label =  leg ,markersize=7)
-        #for x, y, marker, markersize_t in zip(bpp, psnr, symbols, markersize):
         plt.plot(bpp, psnr, marker="o", markersize=7, color =  colore)
                 
 
