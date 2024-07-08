@@ -12,7 +12,7 @@ from dataset import ImageFolder
 
 
 
-from models import TCM, TCMSTanH, ScaleHyperpriorStanH, GainedScaleHyperprior, gain_WACNN, WACNN_stanh
+from models import get_model #TCM, TCMSTanH, ScaleHyperpriorStanH, GainedScaleHyperprior, gain_WACNN, WACNN_stanh
  
 import os
 from compressai.zoo import bmshj2018_hyperprior
@@ -79,86 +79,7 @@ def save_checkpoint(state, is_best, filename,filename_best,very_best):
 
 
 
-def get_model(args,device):
 
-    if args.model == "wacnn_stanh":
-        gaussian_configuration = configure_latent_space_policy(args,multi = True if len(args.lambda_list) > 1 else False )
-        annealing_strategy_gaussian =  configure_annealings(gaussian_configuration[0])
-        factorized_configuration = None 
-        annealing_strategy_factorized = None 
-
-        net = WACNN_stanh( N = args.N, 
-                          M = args.M,
-                          refinement = args.refinement,
-                          gaussian_configuration=gaussian_configuration if len(args.lambda_list) > 1 else gaussian_configuration[0], 
-                          lambda_list = args.lambda_list )
-        net = net.to(device)
-        return net, gaussian_configuration, annealing_strategy_gaussian, factorized_configuration, annealing_strategy_factorized
-
-    elif args.model == "stanh":
-
-        gaussian_configuration = configure_latent_space_policy(args)
-        annealing_strategy_gaussian =  configure_annealings(gaussian_configuration)
-
-        factorized_configuration = gaussian_configuration
-        annealing_strategy_factorized = configure_annealings(gaussian_configuration)
-
-
-        net = TCMSTanH(lmbda = args.lambda_list,gaussian_configuration=gaussian_configuration,config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=args.N, M=320)
-        net = net.to(device)
-        return net, gaussian_configuration, annealing_strategy_gaussian
-    elif args.model == "scale_stanh":
-        if args.checkpoint != "none":
-            new_args = torch.load(args.checkpoint, map_location=device)["args"]
-        else:
-            new_args = args
-        gaussian_configuration = configure_latent_space_policy(new_args)
-
-        annealing_strategy_gaussian =  configure_annealings(gaussian_configuration)
-        factorized_configuration = gaussian_configuration
-        annealing_strategy_factorized = configure_annealings(gaussian_configuration)
-
-        net = ScaleHyperpriorStanH(N = new_args.N, M = new_args.M,gaussian_configuration=gaussian_configuration)
-        net = net.to(device)
-        
-
-        if args.quality != 0:
-
-            base_m = bmshj2018_hyperprior(quality=args.quality, pretrained=True).eval().to(device)
-            base_m.update()
-            state_dict = base_m.state_dict()
-
-            state_dict = delete_keys(state_dict)
-
-            #net.update(force = True) 
-            net.load_state_dict(state_dict=state_dict, strict=False)
-
-        return net, gaussian_configuration, annealing_strategy_gaussian, factorized_configuration, annealing_strategy_factorized
-    elif args.model == "scale_gain":
-        gaussian_configuration = None,
-        annealing_strategy_gaussian = None 
-        factorized_configuration = None 
-        annealing_strategy_factorized = None 
-        net = GainedScaleHyperprior(N = args.N, M = args.M, lmbda_list = args.lambda_list) 
-        net = net.to(device)
-        return net, gaussian_configuration, annealing_strategy_gaussian, factorized_configuration, annealing_strategy_factorized
-
-    elif args.model == "wacnn_gain":
-        gaussian_configuration = None,
-        annealing_strategy_gaussian = None 
-        factorized_configuration = None 
-        annealing_strategy_factorized = None 
-        net = gain_WACNN(N = args.N, M = args.M, lmbda_list= args.lambda_list )
-        net = net.to(device)
-        return net, gaussian_configuration, annealing_strategy_gaussian, factorized_configuration, annealing_strategy_factorized
-    
-    else:
-        gaussian_configuration = None
-        annealing_strategy_gaussian = None
-        net = TCM(config=[2,2,2,2,2,2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0.0, N=args.N, M=320)
-        net = net.to(device)
-
-        return net, gaussian_configuration, annealing_strategy_gaussian
 
 def main(argv):
 
@@ -239,10 +160,10 @@ def main(argv):
         pin_memory=(device == "cuda"),
     )
 
-
+    print("ounnnnnnnnnn")
     net, _, annealing_strategy_gaussian, _, annealing_strategy_factorized = get_model(args,device)
 
-    annealing_strategy_factorized = None
+    print("ouuuuuu 2")
 
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
@@ -263,9 +184,11 @@ def main(argv):
 
         
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        state_dict = delete_keys(checkpoint["state_dict"])
+        state_dict = checkpoint["state_dict"]
+        #state_dict = delete_keys(checkpoint["state_dict"])
         net.load_state_dict(state_dict, strict = False)
         net.update()
+        print("ARRIVO FINO A QUA!!!!")
         #if args.continue_train:
         #    last_epoch = checkpoint["epoch"] + 1
         #    optimizer.load_state_dict(checkpoint["optimizer"])
@@ -275,7 +198,7 @@ def main(argv):
     best_loss = float("inf")
 
     if args.freeze:
-        net.unlock_only_stanh()
+        net.unlock_only_stanh(g_s_tune = True)
         aux_optimizer = None
         net.entropy_bottleneck.stanh.define_channels_map()
         net.gaussian_conditional.stanh.define_channels_map()
@@ -356,7 +279,7 @@ def main(argv):
 
 
                 print("finito primo plot")
-                plot_rate_distorsion(bpp_res, psnr_res,epoch_enc)
+                #plot_rate_distorsion(bpp_res, psnr_res,epoch_enc)
                 print("finito secondo plot")
                 epoch_enc +=1
 
@@ -366,7 +289,7 @@ def main(argv):
             check = "zero"
 
         # creating savepath
-        name_folder = check +  args.model  + "_" + str(args.N)  + "_" + str(args.symmetry) + "_" + str(args.gauss_gp) + "_" + args.refinement
+        name_folder = check +  args.model  + "_" + str(args.N)  + "_" + str(args.symmetry) + "_" + str(args.gauss_gp) + "_" + str(args.lambda_list)
         cartella = os.path.join(args.save_path,name_folder)
 
 

@@ -47,18 +47,18 @@ def train_one_epoch(counter,
             gap = out_net["gap_gaussian"]
             if annealing_strategy.type=="random":
                 annealing_strategy.step(gap = gap)
-                model.gaussian_conditional.stanh.beta = annealing_strategy.beta
+                model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
             else: 
                 lss = out_criterion["loss"].clone().detach().item()
                 annealing_strategy.step(gap, epoch, lss)
-                #model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
-                model.gaussian_conditional.stanh.beta = annealing_strategy.beta
+                model.gaussian_conditional[p].stanh.beta = annealing_strategy.beta
+                #model.gaussian_conditional.stanh.beta = annealing_strategy.beta
             
 
             if wandb_log:
                 wand_dict = {
                     "general_data/":counter,
-                    "general_data/gaussian_beta: ":model.gaussian_conditional.stanh.beta #model.gaussian_conditional[p].stanh.beta
+                    "general_data/gaussian_beta: ":model.gaussian_conditional[p].stanh.beta
                 }  
                 wandb.log(wand_dict)
         

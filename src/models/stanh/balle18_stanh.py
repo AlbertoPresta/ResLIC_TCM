@@ -62,16 +62,20 @@ class ScaleHyperpriorStanH(ScaleHyperprior):
     def load_state_dict(self, state_dict, strict=True):
         return super().load_state_dict(state_dict,strict = strict)
 
-    def unlock_only_stanh(self):
+    def unlock_only_stanh(self, g_s_tune = False):
         for p in self.parameters():
             p.requires_grad = False 
+
+        if g_s_tune:
+            for p in self.g_s.parameters():
+                p.requires_grad = True
         
 
         if isinstance(self.entropy_bottleneck,EntropyBottleneckStanh):
 
-            for n,p in self.entropy_bottleneck.stanh.named_parameters():
+            for n,p in self.entropy_bottleneck.named_parameters():
                 p.requires_grad = True 
-            for p in self.entropy_bottleneck.stanh.parameters():
+            for p in self.entropy_bottleneck.parameters():
                 p.requires_grad = True 
         
         if isinstance(self.gaussian_conditional, GaussianConditionalStanh):

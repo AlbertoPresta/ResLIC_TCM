@@ -108,7 +108,7 @@ class HypeEntropyModelSoS(nn.Module):
         if mode == "training":
 
             outputs = inputs - means if (means is not None and self.removing_mean) else inputs
-            outputs = self.stanh(inputs)
+            outputs = self.stanh(outputs)
             outputs = outputs + means if (means is not None and self.removing_mean) else outputs
 
 

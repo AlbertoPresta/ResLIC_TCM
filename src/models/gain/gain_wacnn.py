@@ -32,7 +32,7 @@ class gain_WACNN(WACNN):
         print(" freeze parameters: ", model_fr_parameters)
         return model_tr_parameters
 
-    def forward(self, x, lv = 0):
+    def forward(self, x, tr = True, lv = 0):
         y = self.g_a(x)
         y_shape = y.shape[2:]
         y = y * torch.abs(self.Gain[ lv]).unsqueeze(0).unsqueeze(2).unsqueeze(3) 

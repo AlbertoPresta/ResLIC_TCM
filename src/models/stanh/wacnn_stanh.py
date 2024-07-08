@@ -5,7 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 import torch
-from entropy_models import GaussianConditionalStanh
+from entropy_models import GaussianConditionalStanh,  EntropyBottleneckStanh
+from compressai.entropy_models import EntropyBottleneck 
 from compressai.layers import GDN
 from ..reference.utils import deconv
 
@@ -136,6 +137,8 @@ class WACNN_stanh(WACNN):
                  N=192, 
                  M=320,
                  refinement = "none",
+                 factorized_configuration = None, 
+                 fact_stanh = False,
                  **kwargs):
         super().__init__(N = N, M = M ,**kwargs)
 
@@ -144,6 +147,20 @@ class WACNN_stanh(WACNN):
         self.refinement = refinement
         self.lmbda = lambda_list
         self.levels = len(self.lmbda)
+        print("dio cristo!!! ",self.levels," ",self.lmbda)
+        self.fact_stanh = fact_stanh
+
+
+        if factorized_configuration is None and self.fact_stanh is True:
+            self.factorized_configuration = gaussian_configuration
+        else:
+            self.factorized_configuration = factorized_configuration
+
+        if self.fact_stanh:
+            self.entropy_bottleneck = EntropyBottleneckStanh(N,
+                                            factorized_configuration = self.factorized_configuration)
+        else:
+            self.entropy_bottleneck = EntropyBottleneck(N)
 
         self.gaussian_configuration = gaussian_configuration
         self.gaussian_conditional = nn.ModuleList(GaussianConditionalStanh(None,

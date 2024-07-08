@@ -18,20 +18,20 @@ def plot_rate_distorsion(bpp_res, psnr_res,epoch):
     legenda["gain"]["colore"] = [palette[5],'-']
     legenda["gain"]["legends"] = "gain [1]"
     legenda["gain"]["symbols"] = ["*"]*3
-    legenda["gain"]["markersize"] = [5]*3
+    legenda["gain"]["markersize"] = [7]*3
 
 
 
     legenda["base"]["colore"] = [palette[0],'-']
     legenda["base"]["legends"] = "reference [4]"
     legenda["base"]["symbols"] = ["o"]*3
-    legenda["base"]["markersize"] = [5]*3
+    legenda["base"]["markersize"] = [7]*3
 
     legenda["our"]["colore"] = [palette[3],'-']
     legenda["our"]["legends"] = "proposed"
 
     legenda["our"]["symbols"] = ["*"]*len(psnr_res["our"])
-    legenda["our"]["markersize"] = [5]*len(psnr_res["our"])
+    legenda["our"]["markersize"] = [7]*len(psnr_res["our"])
 
     
     plt.figure(figsize=(12,8)) # fig, axes = plt.subplots(1, 1, figsize=(8, 5))
@@ -58,6 +58,7 @@ def plot_rate_distorsion(bpp_res, psnr_res,epoch):
 
             #plt.plot(bpp, psnr, marker="o", markersize=7, color =  colore)
             plt.plot(bpp[-1], psnr[-1], marker="*", markersize=10, color =  colore)
+            plt.plot(bpp[6], psnr[6], marker="*", markersize=10, color =  colore)
             plt.plot(bpp[:-1], psnr[:-1], marker="o", markersize=7, color =  colore)
         elif type_name == "base":
             plt.plot(bpp, psnr, marker="*", markersize=10, color =  colore)
@@ -114,24 +115,17 @@ def main():
 
 
 
-    psnr_res["our"] =   [30.937, 30.342, 29.79, 29.374, 28.74, 27.23, 26.21]
-    bpp_res["our"] =  [0.325, 0.274, 0.236, 0.21, 0.179, 0.14, 0.0952] 
+    psnr_res["our"] =   [34.633, 33.34, 32.49,  32.078,  31.535,  30.937, 30.342, 29.79, 29.374, 28.74, 27.23, 26.21]
+    bpp_res["our"] =  [0.7315, 0.57, 0.486,  0.446, 0.406, 0.325, 0.274, 0.236, 0.21, 0.179, 0.14, 0.0952] 
 
 
-    bpp_res["gain"] = [0.342, 0.2024, 0.09]
-    psnr_res["gain"] = [29.256,27.582, 25.9183]  
+    bpp_res["gain"] = [0.8835,0.7252,0.342, 0.2024, 0.09]
+    psnr_res["gain"] = [35.235, 34.186, 29.256,27.582, 25.9183]  
 
 
-    psnr_res["base"] =  [
-      27.581536752297392,
-      29.196703405493214,
-      30.972162072759534,
+    psnr_res["base"] =  [27.581536752297392,29.196703405493214,30.972162072759534,32.83818257445048,34.52626403063645]
 
-    ]
-
-    bpp_res["base"] = [0.13129340277777776,
-      0.20889282226562503,
-      0.3198581271701389]
+    bpp_res["base"] = [0.13129340277777776,0.20889282226562503,0.3198581271701389, 0.47835625542534727, 0.6686876085069443]
     plot_rate_distorsion(bpp_res, psnr_res,0)
 
 
